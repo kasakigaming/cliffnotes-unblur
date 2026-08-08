@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>CliffsNotes Unblur</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>CliffsNotes Unblur</h1>
+    <label class="switch">
+      <input type="checkbox" id="toggle">
+      <span class="track"><span class="thumb"></span></span>
+    </label>
+  </header>
+
+  <p id="status" class="status">Checking…</p>
+
+  <dl class="stats">
+    <div><dt>Elements unblurred</dt><dd id="stat-elements">–</dd></div>
+    <div><dt>CSS rules patched</dt><dd id="stat-rules">–</dd></div>
+    <div><dt>Overlays hidden</dt><dd id="stat-overlays">–</dd></div>
+  </dl>
+
+  <div class="actions">
+    <button id="rescan" type="button">Scan again</button>
+    <button id="reload" type="button" class="secondary">Reload page</button>
+  </div>
+
+  <p class="hint">Network rewriting only applies from the start of a page load —
+    reload if a document still looks locked.</p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
