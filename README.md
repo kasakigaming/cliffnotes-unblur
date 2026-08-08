@@ -40,9 +40,28 @@ Ba pass, rẻ trước đắt sau:
    từ mọi nguồn. Kết quả cache trong `WeakSet`, chỉ invalidate khi `style`/`class`
    của node đó đổi. Kèm một pass ghi đè trực tiếp trong CSSOM
    (`document.styleSheets`) cho các sheet same-origin / CORS.
-3. **Ẩn paywall overlay** — chỉ ẩn element vừa được định vị (fixed/sticky/absolute),
-   vừa phủ phần lớn viewport, **và** chứa keyword paywall. Cổng keyword là thứ giữ
-   cho modal / dropdown / backdrop bình thường không bị đụng.
+3. **Ẩn paywall overlay** — hai tầng:
+   - **Theo câu chữ** (`"This is a preview"`, `"View Full Document"`,
+     `"Want to read all N pages"`…): khớp là ẩn, không cần class cũng không cần
+     hình học. Cần thế vì card thật style bằng utility class (`tw-bg-black`…),
+     tên class không nói lên nó là cái gì.
+
+     Việc khó là từ chữ khớp được suy ra **đúng cái hộp**. Cách làm: lấy
+     **tổ tiên chung thấp nhất (LCA)** của các text node khớp. Banner paywall
+     bao giờ cũng nói vài câu đó cùng lúc, nên hộp nhỏ nhất chứa hết chúng chính
+     là banner. Đây là tính chất cấu trúc nên đúng với tài liệu 2 đoạn y như với
+     tài liệu dài — khác hẳn cách đo theo khối lượng chữ (đã thử, hỏng ngay ở
+     tài liệu ngắn: leo quá hộp và ẩn luôn cả bài).
+
+     Một tài liệu có **nhiều** banner độc lập cùng lúc: card cuối tài liệu, cộng
+     thêm khối "Why is this page out of focus?" trên **từng trang**. Gộp chung
+     một LCA sẽ rơi vào wrapper của trang, nên các câu chỉ được gộp cụm chừng nào
+     tổ tiên chung của chúng vẫn còn giống một cái hộp banner. Tiêu chí "còn
+     giống banner" là `foreignTextLength()` — đếm phần chữ **không** thuộc từ
+     vựng paywall; banner thì gần như bằng 0, wrapper chứa bài thì không.
+   - **Theo keyword chung** (`premium`, `subscribe`…): mơ hồ hơn nên vẫn phải qua
+     bài kiểm tra hình học (positioned + phủ phần lớn viewport). Cổng này giữ cho
+     modal / dropdown / backdrop bình thường không bị đụng.
 
 Chạy bằng `MutationObserver` (không phải `setInterval`). Mỗi pass gọi
 `observer.takeRecords()` ở cuối để vứt đúng những record do chính nó tạo ra —

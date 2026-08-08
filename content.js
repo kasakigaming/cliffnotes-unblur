@@ -172,10 +172,128 @@ html.cn-unblur-scroll, body.cn-unblur-scroll {
   // Pass 3 — paywall overlays
   // ---------------------------------------------------------------------------
 
+  // Two tiers. STRONG phrases only ever appear on a paywall card, so a match is
+  // enough on its own — no class name and no geometry involved. That matters
+  // because the real card is styled with utility classes (tw-bg-black, …) that
+  // say nothing about what it is.
+  const PAYWALL_PHRASE = /this is a preview|view full document|go premium|want to read all|already premium|unlock (this )?document|read the full document|to view the full document|why is this page out of focus|because this is a premium document|subscribe to unlock/i;
+
+  // WEAK keywords are ambiguous, so they still have to clear the geometry test.
   const PAYWALL_TEXT = /unlock|premium|subscribe|subscription|upgrade|sign\s?up|create an account|continue reading|get (full |instant )?access|start (your )?free trial/i;
 
   // Never touch structural nodes even if they match the heuristic.
   const STRUCTURAL = /^(HTML|BODY|MAIN|HEADER|FOOTER|NAV|ARTICLE)$/;
+
+  function hide(el) {
+    if (!el || el.dataset.cnUnblurHidden || STRUCTURAL.test(el.tagName)) return;
+    el.dataset.cnUnblurHidden = '1';
+    el.style.setProperty('display', 'none', 'important');
+    stats.overlays++;
+  }
+
+  /**
+   * The card is the lowest element containing *every* paywall phrase.
+   *
+   * A paywall banner always says several of these things at once ("This is a
+   * preview", "Want to read all N pages", "View Full Document", "Already
+   * Premium"), and the smallest box holding all of them is exactly the card.
+   * That is a structural fact, so unlike a text-volume heuristic it holds on a
+   * two-paragraph document just as well as on a long one.
+   */
+  function lowestCommonAncestor(elements) {
+    let ancestor = elements[0];
+    for (const el of elements) {
+      while (ancestor && !ancestor.contains(el)) ancestor = ancestor.parentElement;
+      if (!ancestor) return null;
+    }
+    return ancestor;
+  }
+
+  /**
+   * How much of an element's text is *not* paywall copy. A banner is made of
+   * nothing else, so a box carrying real prose is a layout container and must
+   * not be hidden. This is the check that keeps document text safe when the
+   * length-based limits are too loose to help — a short document.
+   */
+  function foreignTextLength(el) {
+    return el.textContent
+      .split(/(?<=[.?!])\s+|\n+/)
+      .filter((s) => s.trim() && !PAYWALL_PHRASE.test(s) && !PAYWALL_TEXT.test(s))
+      .join(' ')
+      .trim().length;
+  }
+
+  /** A banner is a bounded box of paywall copy; the page wrapper is not. */
+  function isSaneCard(el) {
+    if (!el || STRUCTURAL.test(el.tagName)) return false;
+    const len = el.textContent.trim().length;
+    if (len > 600) return false;
+    const bodyLen = document.body ? document.body.textContent.trim().length : 0;
+    if (bodyLen > 2000 && len / bodyLen > 0.4) return false;
+    return foreignTextLength(el) <= 60;
+  }
+
+  /**
+   * Fallback for a lone phrase: climb only through ancestors that wrap nothing
+   * but the phrase itself. The moment an ancestor contributes text of its own
+   * it is a layout container, not the banner, so we stop below it.
+   */
+  function climbWrappersOnly(start) {
+    let card = start;
+    for (let el = start.parentElement; el && el !== document.body; el = el.parentElement) {
+      if (STRUCTURAL.test(el.tagName)) break;
+      const extra = el.textContent.replace(card.textContent, '').trim();
+      if (extra.length > 30) break;
+      card = el;
+    }
+    return card;
+  }
+
+  function hidePhraseBanners(root) {
+    const scope = root instanceof Element ? root : document.body;
+    if (!scope) return;
+
+    // Text nodes only: node.data needs no layout, unlike innerText.
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.data.length > 4 && PAYWALL_PHRASE.test(node.data)) {
+        const parent = node.parentElement;
+        if (parent && !parent.closest('[data-cn-unblur-hidden]')) hits.push(parent);
+      }
+    }
+    if (!hits.length) return;
+
+    for (const cluster of clusterHits(hits)) {
+      if (cluster.closest('[data-cn-unblur-hidden]')) continue;
+      hide(climbWrappersOnly(cluster));
+    }
+  }
+
+  /**
+   * Group phrases that belong to the same banner.
+   *
+   * A document carries several independent paywall boxes at once — the
+   * end-of-document card plus a "Why is this page out of focus?" block on every
+   * page. Taking one LCA across all of them would land on the page wrapper, so
+   * phrases only merge while their shared ancestor still looks like a card.
+   */
+  function clusterHits(hits) {
+    const clusters = [];
+    for (const el of hits) {
+      let merged = false;
+      for (let i = 0; i < clusters.length; i++) {
+        const shared = lowestCommonAncestor([clusters[i], el]);
+        if (isSaneCard(shared)) {
+          clusters[i] = shared;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) clusters.push(el);
+    }
+    return clusters;
+  }
 
   function isPaywallOverlay(el) {
     const computed = getComputedStyle(el);
@@ -198,16 +316,17 @@ html.cn-unblur-scroll, body.cn-unblur-scroll {
     '[class*="overlay" i], [class*="modal" i]';
 
   function considerOverlay(el) {
-    if (el.dataset.cnUnblurHidden || STRUCTURAL.test(el.tagName)) return;
+    if (el.dataset.cnUnblurHidden) return;
     if (!isPaywallOverlay(el)) return;
-    el.dataset.cnUnblurHidden = '1';
-    el.style.setProperty('display', 'none', 'important');
-    stats.overlays++;
+    hide(el);
   }
 
   function hideOverlays(root) {
     const scope = root instanceof Element ? root : document.body;
     if (!scope) return;
+
+    hidePhraseBanners(scope);
+
     // The injected node may be the overlay itself, not its container.
     if (scope !== document.body && scope.matches(OVERLAY_SELECTOR)) considerOverlay(scope);
     for (const el of scope.querySelectorAll(OVERLAY_SELECTOR)) considerOverlay(el);
